@@ -1,5 +1,5 @@
 import torch
-from homework_train import Seq2SeqTransformer
+from transformer_train import Seq2SeqTransformer
 
 
 class CoupletGenerator:
