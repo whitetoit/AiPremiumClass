@@ -1,3 +1,5 @@
+import csv
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -69,22 +71,25 @@ def train_model(freeze_bert=False, experiment_name='default'):
     LEARNING_RATE = 2e-5 if freeze_bert else 5e-5
     LOG_DIR = f'logs/{experiment_name}'
 
-    # 修改后的数据加载部分
+    # 数据加载部分
     df = pd.read_excel('/kaggle/input/jd_comment_with_label/jd_comment_data.xlsx')
 
-    # 使用更安全的变量名
+    # 过滤自动评论的内容
     filter_condition = df['评价内容(content)'] != "此用户未填写评价内容"
     df = df[filter_condition]
 
     # 分割训练集和验证集
     train_df = df.sample(frac=0.8, random_state=42)
     val_df = df.drop(train_df.index)
-
+    # 加载预训练模型和tokenizer
     tokenizer = AutoTokenizer.from_pretrained('uer/roberta-base-finetuned-dianping-chinese')
-
+    # 创建DataLoader
     def collate_fn(batch):
+        #  处理文本
         texts = [item[0] for item in batch]
+        # 处理标签
         labels = [item[1] for item in batch]
+        # 使用tokenizer对文本进行编码
         inputs = tokenizer(
             texts,
             padding=True,
@@ -97,11 +102,12 @@ def train_model(freeze_bert=False, experiment_name='default'):
             'attention_mask': inputs['attention_mask'],
             'labels': torch.tensor(labels)
         }
-
+    # 创建训练数据集的DataLoader
     train_loader = DataLoader(CommentDataset(train_df, tokenizer),
                               batch_size=BATCH_SIZE,
                               shuffle=True,
-                              collate_fn=collate_fn)
+                              collate_fn=collate_fn) #  使用自定义的collate_fn
+    # 创建验证数据集的DataLoader
     val_loader = DataLoader(CommentDataset(val_df, tokenizer),
                             batch_size=BATCH_SIZE,
                             collate_fn=collate_fn)
@@ -116,9 +122,9 @@ def train_model(freeze_bert=False, experiment_name='default'):
 
     # TensorBoard记录
     writer = SummaryWriter(LOG_DIR)
-
+    # 初始化最佳模型正确率
     best_val_acc = 0.0
-
+    #  训练循环
     for epoch in range(EPOCHS):
         # 训练阶段
         model.train()
@@ -132,7 +138,7 @@ def train_model(freeze_bert=False, experiment_name='default'):
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-
+            # 记录损失
             train_loss += loss.item()
 
         # 验证阶段
@@ -157,14 +163,14 @@ def train_model(freeze_bert=False, experiment_name='default'):
         avg_train_loss = train_loss / len(train_loader)
         avg_val_loss = val_loss / len(val_loader)
         val_acc = correct / total
-
+        # 添加到TensorBoard
         writer.add_scalars('Loss', {
             'train': avg_train_loss,
             'val': avg_val_loss
         }, epoch)
         writer.add_scalar('Accuracy/val', val_acc, epoch)
 
-        # 保存最佳模型
+        # 保存正确率最高的最佳模型
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             torch.save(model.state_dict(), f'/kaggle/working/best_model_{experiment_name}.pth')
@@ -209,7 +215,15 @@ def predict(text, model_path='best_model_unfrozen_bert.pth'):
 
 
 # 使用示例
-sample_text = "手机质量很好，运行速度快，拍照效果出色"
-pred_score, probabilities = predict(sample_text)
-print(f"预测评分: {pred_score}星")
-print("各分数概率:", probabilities)
+texts = ["手机质量很好，运行速度快，拍照效果出色",
+         "手机质量一般，运行速度慢，拍照效果一般",
+         "手机质量差，运行速度很慢，拍照效果差",
+         "手机质量非常差，运行速度非常慢，拍照效果非常差",
+         "这做工是怎么想的，用脚趾头也不至于抠出这样的效果",
+         "有研发实力的就是不一样，软硬件都是无可挑剔的",
+         "不得不说，这个质感真的是一言难尽，小丑设计师"
+         ]
+for text in texts:
+    pred_score, probabilities = predict(text)
+    print(f"预测评分: {pred_score}星")
+    print("各分数概率:", probabilities)
